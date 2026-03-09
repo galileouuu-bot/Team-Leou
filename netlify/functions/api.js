@@ -1,10 +1,10 @@
 // netlify/functions/api.js
-// Handles all data: stories, announcements, recognitions
-// Uses Netlify Blobs as free persistent storage
-
-import { getStore } from "@netlify/blobs";
+// Handles stories, announcements, recognitions
+// Uses Netlify Blobs REST API directly (no npm package needed)
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "teamleou2024";
+const SITE_ID        = process.env.SITE_ID || process.env.NETLIFY_SITE_ID || "";
+const NETLIFY_TOKEN  = process.env.NETLIFY_TOKEN || "";
 
 function cors(body, status = 200) {
   return {
@@ -23,43 +23,62 @@ function isAdmin(event) {
   return event.headers["x-admin-token"] === ADMIN_PASSWORD;
 }
 
-export const handler = async (event) => {
+async function blobGet(key) {
+  const url = `https://api.netlify.com/api/v1/blobs/${SITE_ID}/teamleou/${encodeURIComponent(key)}`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${NETLIFY_TOKEN}` } });
+  if (!r.ok) return null;
+  return r.text();
+}
+
+async function blobSet(key, value) {
+  const url = `https://api.netlify.com/api/v1/blobs/${SITE_ID}/teamleou/${encodeURIComponent(key)}`;
+  await fetch(url, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${NETLIFY_TOKEN}`, "Content-Type": "text/plain" },
+    body: value,
+  });
+}
+
+exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return cors({});
 
-  const store = getStore("teamleou");
-  const path = event.path.replace("/.netlify/functions/api", "").replace("/api", "");
-  const [, collection, id] = path.split("/"); // e.g. /stories, /stories/123
+  const path = event.path.replace("/.netlify/functions/api", "");
+  const parts = path.split("/").filter(Boolean);
+  const collection = parts[0];
+  const id = parts[1];
 
-  // ── GET list ──
+  if (!collection) return cors({ error: "Not found" }, 404);
+
+  // GET list
   if (event.httpMethod === "GET" && !id) {
     try {
-      const raw = await store.get(collection);
-      const items = raw ? JSON.parse(raw) : [];
-      return cors({ items });
+      const raw = await blobGet(collection);
+      return cors({ items: raw ? JSON.parse(raw) : [] });
     } catch {
       return cors({ items: [] });
     }
   }
 
-  // ── POST (add item) ──
+  // POST add item
   if (event.httpMethod === "POST" && !id) {
     if (!isAdmin(event)) return cors({ error: "Unauthorized" }, 401);
     const body = JSON.parse(event.body || "{}");
-    const raw = await store.get(collection).catch(() => null);
-    const items = raw ? JSON.parse(raw) : [];
+    // Skip internal verify calls
+    if (body._verify) return cors({ success: true, item: { id: "verify" } });
+    let items = [];
+    try { const raw = await blobGet(collection); items = raw ? JSON.parse(raw) : []; } catch {}
     const newItem = { ...body, id: Date.now().toString(), date: new Date().toLocaleDateString("en-US") };
     items.unshift(newItem);
-    await store.set(collection, JSON.stringify(items));
+    await blobSet(collection, JSON.stringify(items));
     return cors({ success: true, item: newItem });
   }
 
-  // ── DELETE item ──
+  // DELETE item
   if (event.httpMethod === "DELETE" && id) {
     if (!isAdmin(event)) return cors({ error: "Unauthorized" }, 401);
-    const raw = await store.get(collection).catch(() => null);
-    const items = raw ? JSON.parse(raw) : [];
-    const filtered = items.filter((i) => i.id !== id);
-    await store.set(collection, JSON.stringify(filtered));
+    let items = [];
+    try { const raw = await blobGet(collection); items = raw ? JSON.parse(raw) : []; } catch {}
+    await blobSet(collection, JSON.stringify(items.filter(i => i.id !== id)));
     return cors({ success: true });
   }
 
