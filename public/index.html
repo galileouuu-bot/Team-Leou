@@ -525,27 +525,22 @@ async function loadPhotos() {
     const data = await apiGet(`${PHOTOS_API}/photos`);
     const items = data.items || [];
     if (!items.length) { document.getElementById('emptyGallery').style.display = 'block'; return; }
-    items.forEach((meta, i) => {
-      // Load each photo's actual data
-      loadPhotoCard(meta, i);
-    });
-  } catch { document.getElementById('emptyGallery').style.display = 'block'; }
-}
-
-async function loadPhotoCard(meta, delay) {
-  try {
-    const data = await apiGet(`${PHOTOS_API}/photos/${meta.id}`);
     const grid = document.getElementById('galleryGrid');
-    const div = document.createElement('div');
-    div.className = 'gallery-item';
-    div.style.animationDelay = (delay * 0.05) + 's';
-    div.innerHTML = `
-      <img src="${data.dataUrl}" alt="${meta.name}" loading="lazy" onclick="openLightbox('${data.dataUrl}')">
-      <div class="img-overlay">${meta.name} · ${meta.date}</div>
-      <button class="del-photo" onclick="deletePhoto('${meta.id}',event)" title="Delete">✕</button>
-    `;
-    grid.appendChild(div);
-  } catch {}
+    items.forEach((photo, i) => {
+      const div = document.createElement('div');
+      div.className = 'gallery-item';
+      div.style.animationDelay = (i * 0.05) + 's';
+      div.innerHTML = `
+        <img src="${photo.url}" alt="${photo.name}" loading="lazy" onclick="openLightbox('${photo.url}')">
+        <div class="img-overlay">${photo.name} · ${photo.date}</div>
+        <button class="del-photo" onclick="deletePhoto('${photo.id}',event)" title="Delete">✕</button>
+      `;
+      grid.appendChild(div);
+    });
+  } catch (e) {
+    console.error('loadPhotos error:', e);
+    document.getElementById('emptyGallery').style.display = 'block';
+  }
 }
 
 async function handleFileUpload(e) {
@@ -554,15 +549,21 @@ async function handleFileUpload(e) {
   const progress = document.getElementById('uploadProgress');
   const msg = document.getElementById('uploadMsg');
   progress.classList.add('active');
+  let successCount = 0;
   for (let i = 0; i < files.length; i++) {
     msg.textContent = `Uploading photo ${i + 1} of ${files.length}…`;
-    await uploadPhoto(files[i]);
+    const ok = await uploadPhoto(files[i]);
+    if (ok) successCount++;
   }
   progress.classList.remove('active');
   e.target.value = '';
-  showToast(`${files.length} photo(s) uploaded!`, 'success');
-  loadPhotos();
-  loadStats();
+  if (successCount > 0) {
+    showToast(`${successCount} photo(s) uploaded! 🎉`, 'success');
+    loadPhotos();
+    loadStats();
+  } else {
+    showToast('Upload failed. Check IMGBB_API_KEY is set in Netlify.', 'error');
+  }
 }
 
 function uploadPhoto(file) {
@@ -570,9 +571,14 @@ function uploadPhoto(file) {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        await apiPost(`${PHOTOS_API}/photos`, { dataUrl: ev.target.result, name: file.name });
-      } catch {}
-      resolve();
+        // Strip the "data:image/...;base64," prefix — ImgBB wants raw base64
+        const base64 = ev.target.result.split(',')[1];
+        const res = await apiPost(`${PHOTOS_API}/photos`, { base64, name: file.name });
+        resolve(res.success === true);
+      } catch (err) {
+        console.error('Upload error:', err);
+        resolve(false);
+      }
     };
     reader.readAsDataURL(file);
   });
