@@ -200,10 +200,48 @@
   @keyframes scrollPulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
   @keyframes modalIn { from{opacity:0;transform:scale(0.9) translateY(20px)} to{opacity:1;transform:scale(1) translateY(0)} }
 
+  /* HAMBURGER BUTTON */
+  .hamburger {
+    display:none; flex-direction:column; gap:5px; cursor:pointer;
+    background:none; border:none; padding:6px;
+  }
+  .hamburger span {
+    display:block; width:22px; height:2px;
+    background:white; border-radius:2px; transition:all .3s;
+  }
+  .hamburger.open span:nth-child(1){transform:translateY(7px) rotate(45deg);}
+  .hamburger.open span:nth-child(2){opacity:0;}
+  .hamburger.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg);}
+
+  /* MOBILE DRAWER */
+  .mobile-nav {
+    display:none; position:fixed; top:68px; left:0; right:0; bottom:0; z-index:99;
+    background:rgba(10,22,40,0.98); backdrop-filter:blur(20px);
+    flex-direction:column; align-items:center; justify-content:center; gap:8px;
+    padding:20px;
+  }
+  .mobile-nav.open { display:flex; }
+  .mobile-nav a {
+    width:100%; max-width:300px; padding:16px 24px; border-radius:12px;
+    font-size:16px; font-weight:500; color:rgba(255,255,255,0.7);
+    text-decoration:none; cursor:pointer; transition:all .2s; text-align:center;
+    border:1px solid var(--border);
+  }
+  .mobile-nav a:hover, .mobile-nav a.active {
+    color:white; background:rgba(255,107,0,0.15); border-color:rgba(255,107,0,0.4);
+  }
+  .mobile-admin-btn {
+    width:100%; max-width:300px; margin-top:8px;
+    padding:16px 24px; border-radius:12px;
+    background:linear-gradient(135deg,var(--optum-orange),var(--optum-gold));
+    font-size:16px; font-weight:600; color:white; border:none; cursor:pointer;
+  }
+
   /* RESPONSIVE */
   @media(max-width:768px){
     header{padding:0 16px;}
     nav{display:none;}
+    .hamburger{display:flex;}
     section{padding:86px 16px 40px;}
     .gallery-grid{columns:2;}
     .hero-stats{gap:24px;flex-wrap:wrap;justify-content:center;}
@@ -232,8 +270,21 @@
     <a id="nav-announcements" onclick="showSection('announcements')">Announcements</a>
     <a id="nav-recognition" onclick="showSection('recognition')">Recognition</a>
   </nav>
-  <button class="admin-btn" onclick="openModal('adminModal')">⚙ Admin</button>
+  <button class="admin-btn" onclick="openModal('adminModal')" id="desktopAdminBtn">⚙ Admin</button>
+  <button class="hamburger" id="hamburgerBtn" onclick="toggleMobileNav()" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
 </header>
+
+<!-- MOBILE NAV DRAWER -->
+<div class="mobile-nav" id="mobileNav">
+  <a id="mnav-hero" class="active" onclick="showSection('hero');closeMobileNav()">🏠 Home</a>
+  <a id="mnav-memories" onclick="showSection('memories');closeMobileNav()">📷 Memories</a>
+  <a id="mnav-storyboard" onclick="showSection('storyboard');closeMobileNav()">📖 Storyboard</a>
+  <a id="mnav-announcements" onclick="showSection('announcements');closeMobileNav()">📢 Announcements</a>
+  <a id="mnav-recognition" onclick="showSection('recognition');closeMobileNav()">🏆 Recognition</a>
+  <button class="mobile-admin-btn" onclick="openModal('adminModal');closeMobileNav()">⚙ Admin</button>
+</div>
 
 <!-- HERO -->
 <section id="hero" class="active">
@@ -245,7 +296,7 @@
     <div class="stat"><div class="stat-num" id="stat-stories">–</div><div class="stat-label">Stories</div></div>
     <div class="stat"><div class="stat-num" id="stat-recognize">–</div><div class="stat-label">Recognized</div></div>
   </div>
-  <div class="hero-scroll"><span>Scroll to explore</span><div class="scroll-line"></div></div>
+  <div class="hero-scroll" onclick="showSection('memories')" style="cursor:pointer"><span>Scroll to explore</span><div class="scroll-line"></div></div>
 </section>
 
 <!-- MEMORIES -->
@@ -788,6 +839,29 @@ function showToast(msg, type = 'success') {
 
 // ── INIT ──
 loadStats();
+
+// ── MOBILE NAV ──
+function toggleMobileNav() {
+  const nav = document.getElementById('mobileNav');
+  const btn = document.getElementById('hamburgerBtn');
+  nav.classList.toggle('open');
+  btn.classList.toggle('open');
+}
+function closeMobileNav() {
+  document.getElementById('mobileNav').classList.remove('open');
+  document.getElementById('hamburgerBtn').classList.remove('open');
+}
+
+// Update mobile nav active state
+const _origShowSection = showSection;
+// Patch showSection to also update mobile nav links
+const origShowSection = showSection;
+window.showSection = function(id) {
+  origShowSection(id);
+  document.querySelectorAll('.mobile-nav a').forEach(a => a.classList.remove('active'));
+  const mlink = document.getElementById('mnav-' + id);
+  if (mlink) mlink.classList.add('active');
+};
 </script>
 </body>
 </html>
