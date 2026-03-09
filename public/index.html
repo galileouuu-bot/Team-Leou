@@ -546,35 +546,73 @@ async function loadPhotos() {
 async function handleFileUpload(e) {
   const files = Array.from(e.target.files);
   if (!files.length) return;
+
+  // Get ImgBB key securely from our config endpoint
+  let imgbbKey = '';
+  try {
+    const cfg = await fetch(`${PHOTOS_API}/config`, { headers: { 'x-admin-token': adminToken } }).then(r => r.json());
+    imgbbKey = cfg.imgbbKey || '';
+  } catch {}
+  if (!imgbbKey) {
+    showToast('IMGBB_API_KEY not configured in Netlify', 'error');
+    return;
+  }
+
   const progress = document.getElementById('uploadProgress');
   const msg = document.getElementById('uploadMsg');
   progress.classList.add('active');
   let successCount = 0;
+
   for (let i = 0; i < files.length; i++) {
-    msg.textContent = `Uploading photo ${i + 1} of ${files.length}…`;
-    const ok = await uploadPhoto(files[i]);
+    msg.textContent = `Uploading photo ${i + 1} of ${files.length}...`;
+    const ok = await uploadPhotoDirectly(files[i], imgbbKey);
     if (ok) successCount++;
   }
+
   progress.classList.remove('active');
   e.target.value = '';
   if (successCount > 0) {
-    showToast(`${successCount} photo(s) uploaded! 🎉`, 'success');
+    showToast(`${successCount} photo(s) uploaded!`, 'success');
     loadPhotos();
     loadStats();
   } else {
-    showToast('Upload failed. Check IMGBB_API_KEY is set in Netlify.', 'error');
+    showToast('Upload failed. Please try again.', 'error');
   }
 }
 
-function uploadPhoto(file) {
+// Upload directly from browser to ImgBB (no Netlify size limit!)
+// Then save just the URL to Netlify Blobs via our backend
+function uploadPhotoDirectly(file, imgbbKey) {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        // Strip the "data:image/...;base64," prefix — ImgBB wants raw base64
         const base64 = ev.target.result.split(',')[1];
-        const res = await apiPost(`${PHOTOS_API}/photos`, { base64, name: file.name });
-        resolve(res.success === true);
+
+        // Step 1: Upload image directly to ImgBB from the browser
+        const form = new FormData();
+        form.append('key', imgbbKey);
+        form.append('image', base64);
+        form.append('name', file.name);
+
+        const imgRes = await fetch('https://api.imgbb.com/1/upload', {
+          method: 'POST',
+          body: form
+        });
+        const imgData = await imgRes.json();
+
+        if (!imgData.success) {
+          console.error('ImgBB error:', imgData);
+          resolve(false);
+          return;
+        }
+
+        // Step 2: Save just the URL + metadata to Netlify Blobs
+        const saveRes = await apiPost(`${PHOTOS_API}/photos`, {
+          name: file.name,
+          url: imgData.data.display_url
+        });
+        resolve(saveRes.success === true);
       } catch (err) {
         console.error('Upload error:', err);
         resolve(false);
