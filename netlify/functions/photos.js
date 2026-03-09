@@ -1,11 +1,13 @@
 // netlify/functions/photos.js
-// Uploads images to ImgBB (free image host) and stores URLs in Netlify Blobs
-// ImgBB free tier: unlimited uploads, images never expire on free accounts
+// - GET  /photos/config  → returns ImgBB key to browser (admin only)
+// - GET  /photos         → list all photo metadata
+// - POST /photos         → save photo URL + metadata (upload happens browser→ImgBB directly)
+// - DELETE /photos/:id   → remove photo metadata
 
 import { getStore } from "@netlify/blobs";
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "teamleou2024";
-const IMGBB_API_KEY = process.env.IMGBB_API_KEY || "";
+const IMGBB_API_KEY  = process.env.IMGBB_API_KEY  || "";
 
 function cors(body, status = 200) {
   return {
@@ -29,11 +31,16 @@ export const handler = async (event) => {
 
   const store = getStore({ name: "teamleou", consistency: "strong" });
   const urlParts = event.path.split("/");
-  const photoId = urlParts[urlParts.length - 1];
-  const isPhotoId = photoId && photoId !== "photos";
+  const last = urlParts[urlParts.length - 1];
 
-  // ── GET all photos ──
-  if (event.httpMethod === "GET" && !isPhotoId) {
+  // ── GET /photos/config  → return ImgBB key to admin browser ──
+  if (event.httpMethod === "GET" && last === "config") {
+    if (!isAdmin(event)) return cors({ error: "Unauthorized" }, 401);
+    return cors({ imgbbKey: IMGBB_API_KEY });
+  }
+
+  // ── GET /photos  → list all photos ──
+  if (event.httpMethod === "GET" && last === "photos") {
     try {
       const raw = await store.get("photos-meta");
       const items = raw ? JSON.parse(raw) : [];
@@ -43,40 +50,22 @@ export const handler = async (event) => {
     }
   }
 
-  // ── POST: upload image to ImgBB, store URL ──
-  if (event.httpMethod === "POST" && !isPhotoId) {
+  // ── POST /photos  → save URL + metadata only (image already on ImgBB) ──
+  if (event.httpMethod === "POST" && last === "photos") {
     if (!isAdmin(event)) return cors({ error: "Unauthorized" }, 401);
-    if (!IMGBB_API_KEY) return cors({ error: "IMGBB_API_KEY not configured" }, 500);
 
     const body = JSON.parse(event.body || "{}");
-    const { base64, name } = body;
-    if (!base64) return cors({ error: "No image data provided" }, 400);
-
-    // Upload to ImgBB (send raw base64, no data: prefix)
-    const formData = new URLSearchParams();
-    formData.append("key", IMGBB_API_KEY);
-    formData.append("image", base64);
-    formData.append("name", name || "photo");
-
-    const imgRes = await fetch("https://api.imgbb.com/1/upload", {
-      method: "POST",
-      body: formData,
-    });
-    const imgData = await imgRes.json();
-
-    if (!imgData.success) {
-      return cors({ error: "ImgBB upload failed", detail: imgData.error?.message }, 500);
-    }
+    const { url, name } = body;
+    if (!url) return cors({ error: "No URL provided" }, 400);
 
     const id = Date.now().toString();
     const newPhoto = {
       id,
       name: name || "Photo",
-      url: imgData.data.display_url,
+      url,
       date: new Date().toLocaleDateString("en-US"),
     };
 
-    // Save metadata list to Blobs
     let items = [];
     try {
       const raw = await store.get("photos-meta");
@@ -88,16 +77,16 @@ export const handler = async (event) => {
     return cors({ success: true, item: newPhoto });
   }
 
-  // ── DELETE photo ──
-  if (event.httpMethod === "DELETE" && isPhotoId) {
+  // ── DELETE /photos/:id ──
+  if (event.httpMethod === "DELETE") {
     if (!isAdmin(event)) return cors({ error: "Unauthorized" }, 401);
+    const photoId = last;
     let items = [];
     try {
       const raw = await store.get("photos-meta");
       items = raw ? JSON.parse(raw) : [];
     } catch {}
-    const filtered = items.filter((i) => i.id !== photoId);
-    await store.set("photos-meta", JSON.stringify(filtered));
+    await store.set("photos-meta", JSON.stringify(items.filter(i => i.id !== photoId)));
     return cors({ success: true });
   }
 
